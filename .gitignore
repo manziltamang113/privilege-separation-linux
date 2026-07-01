@@ -1,0 +1,4 @@
+*.o
+backend
+frontend
+secrets.txt
