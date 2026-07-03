@@ -55,7 +55,45 @@ int main(void) {
     char *username = buf;
     char *password = colon + 1;
 
-    printf("[backend] parsed username '%s'\n", username);
+    printf("[backend] checking credentials for user '%s' (still root, euid=%d)\n",
+           username, geteuid());
+
+    FILE *fp = fopen("secrets.txt", "r");
+    if (!fp) {
+        perror("fopen secrets.txt");
+        write(conn_fd, "FAIL", 4);
+        close(conn_fd);
+        exit(1);
+    }
+
+    int authenticated = 0;
+    char line[BUF_SIZE];
+
+    while (fgets(line, sizeof(line), fp)) {
+        line[strcspn(line, "\n")] = '\0';
+
+        char *file_colon = strchr(line, ':');
+        if (!file_colon) continue;
+        *file_colon = '\0';
+        char *file_user = line;
+        char *file_pass = file_colon + 1;
+
+        if (strcmp(username, file_user) == 0 && strcmp(password, file_pass) == 0) {
+            authenticated = 1;
+            break;
+        }
+    }
+    fclose(fp);
+
+    printf("[backend] authentication result: %s\n", authenticated ? "SUCCESS" : "FAILURE");
+
+    explicit_bzero(buf, sizeof(buf));
+
+    if (authenticated) {
+        write(conn_fd, "OK", 2);
+    } else {
+        write(conn_fd, "FAIL", 4);
+    }
 
     close(conn_fd);
     close(listen_fd);
