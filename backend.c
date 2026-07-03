@@ -36,6 +36,27 @@ int main(void) {
     if (conn_fd < 0) { perror("accept"); exit(1); }
     printf("[backend] frontend connected.\n");
 
+    char buf[BUF_SIZE];
+    memset(buf, 0, sizeof(buf));
+
+    ssize_t n = read(conn_fd, buf, sizeof(buf) - 1);
+    if (n <= 0) { perror("read"); close(conn_fd); exit(1); }
+    buf[n] = '\0';
+
+    printf("[backend] received credential request (length %zd bytes)\n", n);
+
+    char *colon = strchr(buf, ':');
+    if (!colon) {
+        write(conn_fd, "FAIL", 4);
+        close(conn_fd);
+        exit(1);
+    }
+    *colon = '\0';
+    char *username = buf;
+    char *password = colon + 1;
+
+    printf("[backend] parsed username '%s'\n", username);
+
     close(conn_fd);
     close(listen_fd);
     unlink(SOCKET_PATH);
