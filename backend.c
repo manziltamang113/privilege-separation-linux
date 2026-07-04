@@ -6,10 +6,13 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <pwd.h>
+#include <errno.h>
 #include <sys/stat.h>
 
 #define SOCKET_PATH "/tmp/auth.sock"
 #define BUF_SIZE 256
+#define UNPRIV_USER "nobody"
 
 int main(void) {
     printf("[backend] starting. Effective UID = %d (should be 0 = root)\n", geteuid());
@@ -89,6 +92,36 @@ int main(void) {
 
     explicit_bzero(buf, sizeof(buf));
 
+    struct passwd *pw = getpwnam(UNPRIV_USER);
+    if (!pw) {
+        fprintf(stderr, "[backend] could not look up user '%s'\n", UNPRIV_USER);
+        write(conn_fd, "FAIL", 4);
+        close(conn_fd);
+        exit(1);
+    }
+    uid_t target_uid = pw->pw_uid;
+
+    printf("[backend] dropping privileges to uid=%d (%s)\n", target_uid, UNPRIV_USER);
+
+    if (setresuid(target_uid, target_uid, target_uid) != 0) {
+        perror("setresuid");
+        write(conn_fd, "FAIL", 4);
+        close(conn_fd);
+        exit(1);
+    }
+
+    printf("[backend] --- privilege drop verification ---\n");
+    printf("[backend] geteuid() now reports: %d (expect %d)\n", geteuid(), target_uid);
+    printf("[backend] getuid()  now reports: %d (expect %d)\n", getuid(), target_uid);
+
+    FILE *retry = fopen("secrets.txt", "r");
+    if (retry) {
+        printf("[backend] !! WARNING: still able to open secrets.txt after drop! Privilege drop FAILED.\n");
+        fclose(retry);
+    } else {
+        printf("[backend] confirmed: secrets.txt is no longer accessible (%s)\n", strerror(errno));
+    }
+
     if (authenticated) {
         write(conn_fd, "OK", 2);
     } else {
@@ -99,5 +132,6 @@ int main(void) {
     close(listen_fd);
     unlink(SOCKET_PATH);
 
+    printf("[backend] done. exiting as uid=%d (never root again).\n", geteuid());
     return 0;
 }
